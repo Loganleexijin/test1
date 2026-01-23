@@ -3,7 +3,10 @@ import { Router } from 'express';
 const router = Router();
 
 // Configuration
-const API_KEY = 'aa75539a-ddc6-4442-97b5-8d2d8d4be7c4';
+const API_KEY = process.env.DOUBAO_API_KEY;
+if (!API_KEY) {
+  console.warn('Warning: DOUBAO_API_KEY is not set in environment variables.');
+}
 const MODEL_ID = 'doubao-seed-1-8-251228';
 const ENDPOINT_URL = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
 
