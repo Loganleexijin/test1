@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, Phone, Lock } from 'lucide-react';
+import { LogIn, Phone, Lock, Chrome } from 'lucide-react';
 import { useFastingStore } from '@/store/fastingStore';
+import { supabase } from '@/lib/supabase';
 
 const toHex = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
@@ -23,6 +24,42 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
 
   const isLoggedIn = useMemo(() => Boolean(authToken), [authToken]);
+
+  useEffect(() => {
+    // 监听 Supabase 登录状态变化
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        setAuthToken(session.access_token);
+        // 如果是新用户，可能需要初始化 profile
+        if (!userProfile.userId.startsWith('FLUX_')) {
+             // 简单的逻辑：如果当前没有有效的本地 profile，就保持默认
+        }
+        navigate('/settings');
+      }
+    });
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [setAuthToken, navigate, userProfile.userId]);
+
+  const handleGoogleLogin = async () => {
+    try {
+      setError('');
+      // 优先使用环境变量中的 Site URL，否则使用当前 origin
+      const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          // 登录成功后重定向回登录页（或首页），Supabase 会附带 token
+          redirectTo: `${siteUrl}/login`,
+        },
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error('Google login error:', error);
+      setError(error.message || 'Google 登录失败，请重试');
+    }
+  };
 
   const handleLogin = async () => {
     setError('');
@@ -74,6 +111,20 @@ export default function Login() {
           </div>
         ) : (
           <div className="space-y-4">
+            <button
+              onClick={handleGoogleLogin}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-white rounded-full font-bold text-lg shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 active:scale-95 transition-all"
+            >
+              <Chrome className="w-5 h-5 text-red-500" />
+              Google 账号登录
+            </button>
+
+            <div className="relative flex items-center py-2">
+              <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
+              <span className="flex-shrink-0 mx-4 text-gray-400 text-xs">或使用手机号</span>
+              <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700 dark:text-gray-200">手机号</label>
               <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3">
