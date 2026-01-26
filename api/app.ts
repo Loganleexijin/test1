@@ -2,17 +2,19 @@
  * This is a API server
  */
 
+import dotenv from 'dotenv'
+
+// load env
+dotenv.config()
+
 import express, {
   type Request,
   type Response,
 } from 'express'
 import cors from 'cors'
-import dotenv from 'dotenv'
 import authRoutes from './routes/auth.js'
 import aiRoutes from './routes/ai.js'
-
-// load env
-dotenv.config()
+import fastingRoutes from './routes/fasting.js'
 
 const app: express.Application = express()
 
@@ -25,6 +27,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }))
  */
 app.use('/api/auth', authRoutes)
 app.use('/api/ai', aiRoutes)
+app.use('/api/fasting', fastingRoutes)
 
 /**
  * health

@@ -3,12 +3,12 @@ import { persist } from 'zustand/middleware';
 import type { 
   FastingSession, 
   FastingStatus, 
-  SessionSource, 
   FastingPlan, 
   SubscriptionType,
   FoodAnalysisResult,
   MealRecord
 } from '@/types';
+import { computeBadgeStats, getUnlockedBadgeIds } from '@/utils/badges';
 
 interface NotificationSettings {
   fastingReminder: boolean;
@@ -34,6 +34,7 @@ interface UserProfile {
   lastLoginAt: string | null;
   nicknameChangedCount: number;
   nicknameLastChangedAt: number | null;
+  remainingFreeAnalyses: number;
 }
 
 interface UserStats {
@@ -57,10 +58,11 @@ interface FastingState {
   passwordSalt: string | null;
   userProfile: UserProfile;
   userStats: UserStats;
+  stageCopyIndex: Record<string, number>;
   
-  startFast: (targetHours: number) => void;
-  endFast: () => void;
-  cancelFast: () => void;
+  startFast: (targetHours: number) => Promise<void>;
+  endFast: () => Promise<void>;
+  cancelFast: () => Promise<void>;
   updateSessionStatus: (status: FastingStatus) => void;
   adjustStartTime: (newStartTime: number) => void;
   backfillSession: (session: Omit<FastingSession, 'id' | 'duration_minutes' | 'completed'>) => void;
@@ -70,77 +72,20 @@ interface FastingState {
   setSubscriptionType: (type: SubscriptionType) => void;
   saveAIResult: (sessionId: string, result: FoodAnalysisResult) => void;
   addMealRecord: (record: MealRecord) => void;
+  updateMealRecord: (id: string, patch: Partial<MealRecord>) => void;
   deleteMealRecord: (id: string) => void;
   clearAllData: () => void;
-  loadSession: () => void;
+  loadSession: () => Promise<void>;
   setAuthToken: (token: string | null) => void;
   setPasswordCreds: (creds: { passwordHash: string; passwordSalt: string } | null) => void;
   updateUserProfile: (patch: Partial<UserProfile>) => void;
   updateUserStats: (patch: Partial<UserStats>) => void;
   resetAll: () => void;
+  setStageCopyIndex: (stageId: string, index: number) => void;
+  updateHistorySessionTimes: (id: string, startAt: number, endAt: number) => void;
+  refreshBadges: () => void;
+  analyzeMeal: (recordId: string, image: string) => Promise<void>;
 }
-
-const createSession = (
-  status: FastingStatus,
-  startAt: number,
-  targetHours: number,
-  source: SessionSource,
-  timezone: string
-): FastingSession => {
-  const endAt = status === 'completed' || status === 'eating' ? Date.now() : null;
-  const durationMinutes = endAt 
-    ? Math.floor((endAt - startAt) / 60000)
-    : Math.floor((Date.now() - startAt) / 60000);
-  const completed = durationMinutes >= targetHours * 60;
-
-  return {
-    id: crypto.randomUUID(),
-    fasting_status: status,
-    start_at: startAt,
-    end_at: endAt,
-    target_duration_hours: targetHours,
-    duration_minutes: durationMinutes,
-    completed,
-    source,
-    timezone,
-  };
-};
-
-const createDefaultUserProfile = (): UserProfile => {
-  const id = `FLUX_${Math.floor(100000 + Math.random() * 900000)}`;
-  const now = new Date().toISOString();
-  return {
-    userId: id,
-    nickname: 'Flux 用户',
-    avatarDataUrl: null,
-    phone: null,
-    phoneVerified: false,
-    hasPassword: false,
-    isPro: false,
-    proExpireAt: null,
-    notificationSettings: {
-      fastingReminder: true,
-      eatingWindowReminder: false,
-      dailyCheckIn: true,
-      dailyCheckInTime: '20:00',
-      badgeUnlock: true,
-      achievementShare: false,
-      systemNotification: true,
-    },
-    createdAt: now,
-    lastLoginAt: null,
-    nicknameChangedCount: 0,
-    nicknameLastChangedAt: null,
-  };
-};
-
-const createDefaultUserStats = (): UserStats => ({
-  mealCostSetting: 30,
-  initialWeight: null,
-  currentWeight: null,
-  actualAge: null,
-  badgesUnlocked: [],
-});
 
 export const useFastingStore = create<FastingState>()(
   persist(
@@ -155,74 +100,114 @@ export const useFastingStore = create<FastingState>()(
       authToken: null,
       passwordHash: null,
       passwordSalt: null,
-      userProfile: createDefaultUserProfile(),
-      userStats: createDefaultUserStats(),
+      
+      userProfile: {
+        userId: crypto.randomUUID(),
+        nickname: 'User',
+        avatarDataUrl: null,
+        phone: null,
+        phoneVerified: false,
+        hasPassword: false,
+        isPro: false,
+        proExpireAt: null,
+        notificationSettings: {
+          fastingReminder: true,
+          eatingWindowReminder: true,
+          dailyCheckIn: false,
+          dailyCheckInTime: '09:00',
+          badgeUnlock: true,
+          achievementShare: true,
+          systemNotification: true,
+        },
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+        nicknameChangedCount: 0,
+        nicknameLastChangedAt: null,
+        remainingFreeAnalyses: 3,
+      },
+      
+      userStats: {
+        mealCostSetting: 30,
+        initialWeight: null,
+        currentWeight: null,
+        actualAge: null,
+        badgesUnlocked: [],
+      },
+      
+      stageCopyIndex: {},
 
-      startFast: (targetHours: number) => {
-        const session = createSession(
-          'fasting',
-          Date.now(),
-          targetHours,
-          'manual_start',
-          Intl.DateTimeFormat().resolvedOptions().timeZone
-        );
-        set({ currentSession: session });
+      startFast: async (targetHours: number) => {
+        try {
+          const response = await fetch('/api/fasting/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              targetHours, 
+              startTime: Date.now(),
+              plan: get().fastingPlan 
+            })
+          });
+          const { data } = await response.json();
+          if (data) {
+            set({ currentSession: data });
+          }
+        } catch (error) {
+          console.error('Failed to start fast:', error);
+        }
       },
 
-      endFast: () => {
-        const { currentSession, historySessions } = get();
-        if (!currentSession) return;
-
-        const completedSession = {
-          ...currentSession,
-          fasting_status: 'completed' as FastingStatus,
-          end_at: Date.now(),
-          duration_minutes: Math.floor((Date.now() - currentSession.start_at) / 60000),
-          completed: Math.floor((Date.now() - currentSession.start_at) / 60000) >= currentSession.target_duration_hours * 60,
-        };
-
-        set({
-          currentSession: null,
-          historySessions: [completedSession, ...historySessions].slice(0, 50),
-        });
+      endFast: async () => {
+        try {
+          const response = await fetch('/api/fasting/end', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const { data } = await response.json();
+          if (data) {
+            set((state) => ({
+              currentSession: null, // Clear active session
+              historySessions: [data, ...state.historySessions],
+              // Keep plan, don't reset stats immediately
+            }));
+          }
+        } catch (error) {
+          console.error('Failed to end fast:', error);
+        }
       },
 
-      cancelFast: () => {
-        const { currentSession } = get();
-        if (!currentSession) return;
-        set({ currentSession: null });
+      cancelFast: async () => {
+        try {
+          await fetch('/api/fasting/cancel', { method: 'POST' });
+          set({ currentSession: null });
+        } catch (error) {
+          console.error('Failed to cancel fast:', error);
+        }
       },
 
       updateSessionStatus: (status: FastingStatus) => {
-        set((state) => ({
-          currentSession: state.currentSession
-            ? { ...state.currentSession, fasting_status: status }
-            : null,
-        }));
+        const { currentSession } = get();
+        if (!currentSession) return;
+        set({ currentSession: { ...currentSession, fasting_status: status } });
       },
 
       adjustStartTime: (newStartTime: number) => {
-        set((state) => ({
-          currentSession: state.currentSession
-            ? { ...state.currentSession, start_at: newStartTime, source: 'manual_edit' }
-            : null,
-        }));
+        const { currentSession } = get();
+        if (!currentSession) return;
+        set({ currentSession: { ...currentSession, start_at: newStartTime } });
       },
 
       backfillSession: (sessionData) => {
-        const durationMinutes = Math.floor((Date.now() - sessionData.start_at) / 60000);
-        const completed = durationMinutes >= sessionData.target_duration_hours * 60;
-
-        const session: FastingSession = {
-          id: crypto.randomUUID(),
+        const { historySessions } = get();
+        const newSession: FastingSession = {
           ...sessionData,
-          duration_minutes: durationMinutes,
-          completed,
+          id: crypto.randomUUID(),
+          duration_minutes: Math.floor((sessionData.end_at! - sessionData.start_at) / 60000),
+          completed: true,
         };
-
-        set((state) => ({
-          historySessions: [session, ...state.historySessions],
-        }));
+        
+        set({
+          historySessions: [newSession, ...historySessions].sort((a, b) => b.start_at - a.start_at)
+        });
       },
 
       setFastingPlan: (plan: FastingPlan) => {
@@ -232,14 +217,7 @@ export const useFastingStore = create<FastingState>()(
       updateCurrentSessionTarget: (newTargetHours: number) => {
         const { currentSession } = get();
         if (!currentSession) return;
-        
-        const updatedSession = {
-          ...currentSession,
-          target_duration_hours: newTargetHours,
-          completed: currentSession.duration_minutes >= newTargetHours * 60
-        };
-        
-        set({ currentSession: updatedSession });
+        set({ currentSession: { ...currentSession, target_duration_hours: newTargetHours } });
       },
 
       setNotificationEnabled: (enabled: boolean) => {
@@ -251,20 +229,27 @@ export const useFastingStore = create<FastingState>()(
       },
 
       saveAIResult: (sessionId: string, result: FoodAnalysisResult) => {
-        set((state) => ({
-          aiResults: new Map(state.aiResults).set(sessionId, result),
-        }));
+        const { aiResults } = get();
+        const newResults = new Map(aiResults);
+        newResults.set(sessionId, result);
+        set({ aiResults: newResults });
       },
 
       addMealRecord: (record: MealRecord) => {
         set((state) => ({
-          mealRecords: [record, ...state.mealRecords],
+          mealRecords: [...state.mealRecords, record]
         }));
       },
 
-      deleteMealRecord: (id: string) => {
+      updateMealRecord: (id, patch) => {
         set((state) => ({
-          mealRecords: state.mealRecords.filter((r) => r.id !== id),
+          mealRecords: state.mealRecords.map(m => m.id === id ? { ...m, ...patch } : m)
+        }));
+      },
+
+      deleteMealRecord: (id) => {
+        set((state) => ({
+          mealRecords: state.mealRecords.filter(m => m.id !== id)
         }));
       },
 
@@ -272,113 +257,120 @@ export const useFastingStore = create<FastingState>()(
         set({
           currentSession: null,
           historySessions: [],
-          aiResults: new Map(),
           mealRecords: [],
+          aiResults: new Map(),
         });
       },
 
-      loadSession: () => {
-        const { currentSession } = get();
-        if (!currentSession) return;
+      loadSession: async () => {
+        try {
+          // Load current session
+          const currentRes = await fetch('/api/fasting/current');
+          const currentJson = await currentRes.json();
+          
+          // Load plan
+          const planRes = await fetch('/api/fasting/plan');
+          const planJson = await planRes.json();
 
-        const now = Date.now();
-        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        
-        if (now < currentSession.start_at) {
-          console.warn('System time anomaly detected');
-          return;
+          set({ 
+            currentSession: currentJson.data,
+            fastingPlan: planJson.data?.plan || '16:8'
+          });
+        } catch (error) {
+          console.error('Failed to load session:', error);
         }
-
-        const durationMinutes = Math.floor((now - currentSession.start_at) / 60000);
-        const completed = durationMinutes >= currentSession.target_duration_hours * 60;
-        
-        let newStatus: FastingStatus = currentSession.fasting_status;
-        if (completed) {
-          newStatus = 'completed';
-        }
-
-        set((state) => ({
-          currentSession: state.currentSession
-            ? {
-                ...state.currentSession,
-                duration_minutes: durationMinutes,
-                completed,
-                fasting_status: newStatus,
-                timezone,
-              }
-            : null,
-        }));
       },
 
-      setAuthToken: (token) => {
-        set({ authToken: token });
-        set((state) => ({ userProfile: { ...state.userProfile, lastLoginAt: token ? new Date().toISOString() : state.userProfile.lastLoginAt } }));
-      },
-
+      setAuthToken: (token) => set({ authToken: token }),
       setPasswordCreds: (creds) => {
-        if (!creds) {
+        if (creds) {
+          set({ passwordHash: creds.passwordHash, passwordSalt: creds.passwordSalt });
+        } else {
           set({ passwordHash: null, passwordSalt: null });
-          set((state) => ({ userProfile: { ...state.userProfile, hasPassword: false } }));
-          return;
         }
-        set({ passwordHash: creds.passwordHash, passwordSalt: creds.passwordSalt });
-        set((state) => ({ userProfile: { ...state.userProfile, hasPassword: true } }));
       },
 
       updateUserProfile: (patch) => {
-        set((state) => ({ userProfile: { ...state.userProfile, ...patch } }));
+        set((state) => ({
+          userProfile: { ...state.userProfile, ...patch }
+        }));
       },
 
       updateUserStats: (patch) => {
-        set((state) => ({ userStats: { ...state.userStats, ...patch } }));
+        set((state) => ({
+          userStats: { ...state.userStats, ...patch }
+        }));
       },
 
       resetAll: () => {
         set({
           currentSession: null,
           historySessions: [],
-          fastingPlan: '16:8',
-          notificationEnabled: false,
-          subscriptionType: 'free',
-          aiResults: new Map(),
-          mealRecords: [],
           authToken: null,
           passwordHash: null,
           passwordSalt: null,
-          userProfile: createDefaultUserProfile(),
-          userStats: createDefaultUserStats(),
+          mealRecords: [],
         });
       },
+
+      setStageCopyIndex: (stageId, index) => {
+        set((state) => ({
+          stageCopyIndex: {
+            ...state.stageCopyIndex,
+            [stageId]: index
+          }
+        }));
+      },
+
+      updateHistorySessionTimes: (id, startAt, endAt) => {
+        set((state) => ({
+          historySessions: state.historySessions.map(s => 
+            s.id === id 
+              ? { 
+                  ...s, 
+                  start_at: startAt, 
+                  end_at: endAt,
+                  duration_minutes: Math.floor((endAt - startAt) / 60000)
+                }
+              : s
+          )
+        }));
+      },
+
+      refreshBadges: () => {
+        const { historySessions, userStats } = get();
+        const stats = computeBadgeStats(historySessions);
+        const unlocked = getUnlockedBadgeIds(stats);
+        
+        // Check for newly unlocked
+        const newBadges = unlocked.filter(id => !userStats.badgesUnlocked.includes(id));
+        if (newBadges.length > 0) {
+          set({
+            userStats: {
+              ...userStats,
+              badgesUnlocked: unlocked
+            }
+          });
+          // Here you could trigger a notification
+        }
+      },
+
+      analyzeMeal: async (recordId, image) => {
+        // This would now call the backend AI API
+        console.log('Analyzing meal via API...', recordId);
+      }
     }),
     {
       name: 'fasting-storage',
+      version: 1,
       partialize: (state) => ({
-        currentSession: state.currentSession,
-        historySessions: state.historySessions,
+        // We persist less now, relying on API
         fastingPlan: state.fastingPlan,
-        notificationEnabled: state.notificationEnabled,
-        subscriptionType: state.subscriptionType,
-        aiResults: Array.from(state.aiResults.entries()),
-        mealRecords: state.mealRecords,
         authToken: state.authToken,
-        passwordHash: state.passwordHash,
-        passwordSalt: state.passwordSalt,
         userProfile: state.userProfile,
         userStats: state.userStats,
+        stageCopyIndex: state.stageCopyIndex
       }),
-      onRehydrateStorage: () => (state) => {
-        if (state?.aiResults) {
-          const entries = state.aiResults as unknown as Array<[string, FoodAnalysisResult]>;
-          state.aiResults = new Map(entries);
-        }
-        if (state) {
-          if (!state.userProfile) state.userProfile = createDefaultUserProfile();
-          if (!state.userStats) state.userStats = createDefaultUserStats();
-          if (typeof state.authToken === 'undefined') state.authToken = null;
-          if (typeof state.passwordHash === 'undefined') state.passwordHash = null;
-          if (typeof state.passwordSalt === 'undefined') state.passwordSalt = null;
-        }
-      },
     }
   )
 );

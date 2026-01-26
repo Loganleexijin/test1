@@ -35,6 +35,11 @@ export interface AIAnalysisResult {
 export interface FoodAnalysisResult {
   foodName: string;
   calories: number;
+  macros?: {
+    protein: string;
+    fat: string;
+    carbs: string;
+  };
   tags: string[];
   advice: string;
   nextStep: string;
@@ -54,6 +59,7 @@ export interface MealRecord {
   imageUrl?: string;
   foodName: string;
   calories: number;
+  analysisCompletedAt?: number;
   nutrients?: {
     protein: string;
     fat: string;
@@ -61,6 +67,8 @@ export interface MealRecord {
   };
   tags?: string[];
   aiAnalysis?: FoodAnalysisResult;
+  status?: 'analyzing' | 'done' | 'error';
+  analysisError?: string;
 }
 
 export interface FastingStage {
@@ -73,6 +81,18 @@ export interface FastingStage {
   detail?: string;
   tip?: string;
   color: string; // HSL
+}
+
+export interface DailyAnalysisReport {
+  date: string;
+  totalCalories: number;
+  nutritionalEvaluation: {
+    score: number; // 0-100
+    summary: string;
+    deficiencies: string[];
+    excesses: string[];
+  };
+  advice: string;
 }
 
 export interface AppState {

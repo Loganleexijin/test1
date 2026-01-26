@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { X, Camera, Image, Sparkles, Activity, Coffee, UtensilsCrossed, Moon, Cookie, Clock, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Camera, Image, Coffee, UtensilsCrossed, Moon, Cookie, ChevronRight, Crown, ScanLine } from 'lucide-react';
 import { useFastingStore } from '@/store/fastingStore';
-import type { FoodAnalysisResponse, FoodAnalysisResult } from '@/types';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -9,6 +8,7 @@ interface CameraModalProps {
 }
 
 type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+type ModalStep = 'select_meal' | 'select_method' | 'preview';
 
 const MEAL_TYPES = [
   { id: 'breakfast' as MealType, label: '早餐', icon: Coffee, color: 'bg-amber-100 text-amber-600', borderColor: 'border-amber-300' },
@@ -18,47 +18,41 @@ const MEAL_TYPES = [
 ];
 
 export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
-  const { currentSession, saveAIResult, addMealRecord } = useFastingStore();
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const { addMealRecord, analyzeMeal, userProfile } = useFastingStore();
   const [selectedMealType, setSelectedMealType] = useState<MealType>('lunch');
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<FoodAnalysisResponse | null>(null);
   const [error, setError] = useState('');
-  const [progress, setProgress] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState(0);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isClosingRef = useRef(false);
-  const okResult = result && !('error' in result) ? result : null;
+  
+  // Flow state
+  const [step, setStep] = useState<ModalStep>('select_meal');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
-      isClosingRef.current = false;
+      setStep('select_meal');
+      setPreviewImage(null);
+      setError('');
       return;
     }
 
-    // Auto-select meal type based on time
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 11) setSelectedMealType('breakfast');
     else if (hour >= 11 && hour < 17) setSelectedMealType('lunch');
     else if (hour >= 17 && hour < 22) setSelectedMealType('dinner');
     else setSelectedMealType('snack');
-
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-      }
-    };
+    
+    setStep('select_meal');
   }, [isOpen]);
 
-  const compressImage = (base64Str: string, maxWidth = 1024, maxQuality = 0.85): Promise<string> => {
+  const compressImage = (
+    base64Str: string,
+    maxWidth = 768,
+    maxQuality = 0.75,
+    targetSizeMB = 0.6
+  ): Promise<string> => {
     return new Promise((resolve, reject) => {
       const img = document.createElement('img');
       img.src = base64Str;
-      
+
       img.onload = () => {
         try {
           const canvas = document.createElement('canvas');
@@ -87,7 +81,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
             const sizeInBytes = Math.round((result.length * 3) / 4);
             const sizeInMB = sizeInBytes / (1024 * 1024);
 
-            if (sizeInMB <= 2 || currentQuality < 0.5) {
+            if (sizeInMB <= targetSizeMB || currentQuality < 0.4) {
               resolve(result);
             } else {
               quality = currentQuality - 0.1;
@@ -101,7 +95,7 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
           reject(err);
         }
       };
-      
+
       img.onerror = (err) => reject(err);
     });
   };
@@ -112,21 +106,18 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // Basic validation
       if (!file.type.startsWith('image/')) {
         setError('请选择有效的图片文件');
         return;
       }
 
-      // Read file
       const reader = new FileReader();
       reader.onloadend = async () => {
         const rawBase64 = reader.result as string;
         try {
-          // Compress image before setting state or uploading
           const compressedBase64 = await compressImage(rawBase64);
-          setSelectedImage(compressedBase64);
-          handleAnalyze(compressedBase64);
+          setPreviewImage(compressedBase64);
+          setStep('preview');
         } catch (compressErr) {
           console.error('Image compression failed:', compressErr);
           setError('图片处理失败，请重试');
@@ -142,381 +133,232 @@ export default function CameraModal({ isOpen, onClose }: CameraModalProps) {
     }
   };
 
-  const handleAnalyze = async (imageData: string) => {
-    setAnalyzing(true);
-    setError('');
-    setProgress(0);
-    setEstimatedTime(5);
+  const handleConfirm = async () => {
+    if (!previewImage) return;
 
-    abortControllerRef.current = new AbortController();
-
-    try {
-      const currentState =
-        currentSession?.fasting_status === 'fasting'
-          ? '断食中'
-          : currentSession?.fasting_status === 'eating'
-            ? '进食窗口'
-            : '准备开始断食';
-
-      progressIntervalRef.current = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90));
-        setEstimatedTime(prev => Math.max(prev - 1, 0));
-      }, 500);
-
-      const response = await fetch('/api/ai/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: imageData,
-          sessionId: currentSession?.id || 'manual',
-          currentState,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
-
-      setProgress(100);
-
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as FoodAnalysisResponse | null;
-        if (data && 'error' in data && data.error) {
-          throw new Error(data.message);
-        }
-        throw new Error(`分析失败 (${response.status})，请重试`);
-      }
-
-      const data: FoodAnalysisResponse = await response.json();
-      setResult(data);
-
-      if (data && 'error' in data && data.error) {
-        setError(data.message);
-        setSelectedImage(null);
-        setResult(null);
-        return;
-      }
-
-      if (currentSession) {
-        saveAIResult(currentSession.id, data as FoodAnalysisResult);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        setError('');
-        setSelectedImage(null);
-      } else {
-        console.error('Analysis error:', err);
-        setError(err instanceof Error ? err.message : '未知错误');
-        setSelectedImage(null);
-      }
-    } finally {
-      if (!isClosingRef.current) {
-        if (progressIntervalRef.current) {
-          clearInterval(progressIntervalRef.current);
-          progressIntervalRef.current = null;
-        }
-        setAnalyzing(false);
-        setProgress(0);
-        setEstimatedTime(0);
-      }
+    if (!userProfile.isPro && userProfile.remainingFreeAnalyses <= 0) {
+      alert('免费试用次数已用完，请升级解锁无限次分析');
+      return;
     }
-  };
 
-  const handleClose = () => {
-    isClosingRef.current = true;
-    
-    if (analyzing && abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    
-    if (progressIntervalRef.current) {
-      clearInterval(progressIntervalRef.current);
-      progressIntervalRef.current = null;
-    }
-    
-    setAnalyzing(false);
-    setProgress(0);
-    setEstimatedTime(0);
-    setError('');
-    
-    handleReset();
+    const recordId = crypto.randomUUID();
+
+    // 1. Add record immediately with 'analyzing' status
+    addMealRecord({
+      id: recordId,
+      timestamp: Date.now(),
+      type: selectedMealType,
+      imageUrl: previewImage,
+      foodName: 'AI正在分析...',
+      calories: 0,
+      status: 'analyzing',
+    });
+
+    void analyzeMeal(recordId, previewImage);
     onClose();
-  };
-
-  const handleSaveAndClose = () => {
-    if (!okResult || !selectedImage) return;
-      addMealRecord({
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        type: selectedMealType,
-        imageUrl: selectedImage,
-        foodName: okResult.foodName,
-        calories: okResult.calories,
-        tags: okResult.tags,
-        aiAnalysis: okResult,
-      });
-    handleReset();
-    onClose();
-  };
-
-  const handleReset = () => {
-    setSelectedImage(null);
-    setResult(null);
-    setError('');
   };
 
   if (!isOpen) return null;
 
   return (
-    <div 
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={handleClose}
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"
+      onClick={onClose}
     >
-      <div 
-        className="bg-white rounded-[2rem] w-full max-w-sm overflow-hidden shadow-2xl relative min-h-[500px] flex flex-col"
+      <div
+        className="bg-white rounded-[2rem] w-full max-w-sm overflow-hidden shadow-2xl relative min-h-[500px] flex flex-col transition-all duration-300"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close Button */}
-        <button
-          onClick={handleClose}
-          className="absolute top-4 right-4 p-2 bg-black/10 rounded-full hover:bg-black/20 transition-colors z-20 cursor-pointer"
-          type="button"
-          aria-label="关闭"
-        >
-          <X className="w-5 h-5 text-gray-600" />
-        </button>
+        {/* Header */}
+        <div className="relative px-6 pt-6 pb-2 flex items-center justify-between z-20 bg-white">
+          <h2 className="text-xl font-bold text-gray-900">
+            {step === 'select_meal' && '选择餐次'}
+            {step === 'select_method' && '记录饮食'}
+            {step === 'preview' && '确认照片'}
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors cursor-pointer"
+            type="button"
+          >
+            <X className="w-5 h-5 text-gray-700" />
+          </button>
+        </div>
 
-        {!selectedImage ? (
-          // Camera/Upload View
-          <div className="flex-1 flex flex-col p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center mt-4">拍照记录饮食</h2>
-            
-            <div className="mb-6">
-              <p className="text-sm text-gray-500 mb-3 text-center">选择餐次</p>
-              <div className="grid grid-cols-4 gap-3">
+        {/* Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          
+          {/* STEP 1: Select Meal */}
+          {step === 'select_meal' && (
+            <div className="flex-1 flex flex-col p-6 animate-in slide-in-from-right duration-300">
+              <p className="text-gray-500 mb-6">请选择您要记录的餐次：</p>
+              <div className="grid grid-cols-1 gap-4">
                 {MEAL_TYPES.map((meal) => {
                   const Icon = meal.icon;
                   const isSelected = selectedMealType === meal.id;
                   return (
                     <button
                       key={meal.id}
-                      onClick={() => setSelectedMealType(meal.id)}
+                      onClick={() => {
+                        setSelectedMealType(meal.id);
+                        setStep('select_method');
+                      }}
                       className={`
-                        relative flex flex-col items-center p-3 rounded-2xl border-2 transition-all duration-200
-                        ${isSelected 
-                          ? `${meal.color} ${meal.borderColor} border-2 scale-105 shadow-md` 
-                          : 'bg-gray-50 border-transparent hover:bg-gray-100'
+                        flex items-center p-4 rounded-2xl border-2 transition-all duration-200 w-full text-left group
+                        ${isSelected
+                          ? `${meal.color} ${meal.borderColor} shadow-md`
+                          : 'bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-200'
                         }
                       `}
                     >
                       <div className={`
-                        w-10 h-10 rounded-full flex items-center justify-center mb-2
-                        ${isSelected ? 'scale-110' : 'scale-100'}
-                        transition-transform duration-200
+                        w-12 h-12 rounded-full flex items-center justify-center mr-4
+                        ${isSelected ? 'bg-white/50' : 'bg-gray-100 group-hover:bg-white'}
+                        transition-colors
                       `}>
-                        <Icon className={`w-5 h-5 ${isSelected ? '' : 'text-gray-400'}`} />
+                        <Icon className={`w-6 h-6 ${isSelected ? 'text-current' : 'text-gray-500'}`} />
                       </div>
-                      <span className={`text-xs font-medium ${isSelected ? 'font-bold' : 'text-gray-500'}`}>
-                        {meal.label}
-                      </span>
-                      {isSelected && (
-                        <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                          <div className="w-2 h-2 bg-white rounded-full" />
-                        </div>
-                      )}
+                      <div className="flex-1">
+                        <span className={`text-lg font-bold block ${isSelected ? 'text-current' : 'text-gray-800'}`}>
+                          {meal.label}
+                        </span>
+                        <span className={`text-xs ${isSelected ? 'opacity-80' : 'text-gray-400'}`}>
+                          记录{meal.label}摄入
+                        </span>
+                      </div>
+                      <ChevronRight className={`w-5 h-5 ${isSelected ? 'opacity-100' : 'text-gray-300'}`} />
                     </button>
                   );
                 })}
               </div>
             </div>
-            
-            <div className="flex-1 flex flex-col items-center justify-center gap-6">
-              <label className="w-full cursor-pointer group">
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                />
-                <div className="flex flex-col items-center justify-center p-8 rounded-3xl bg-orange-50 border-2 border-dashed border-orange-200 group-hover:border-orange-400 transition-all">
-                  <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    <Camera className="w-8 h-8 text-orange-500" />
+          )}
+
+          {/* STEP 2: Select Method */}
+          {step === 'select_method' && (
+             <div className="flex-1 flex flex-col p-6 animate-in slide-in-from-right duration-300">
+                <div className="flex items-center gap-2 mb-6 bg-gray-50 p-3 rounded-xl">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${MEAL_TYPES.find(m => m.id === selectedMealType)?.color.split(' ')[0]}`}>
+                     {(() => {
+                        const Icon = MEAL_TYPES.find(m => m.id === selectedMealType)?.icon || Coffee;
+                        return <Icon className="w-4 h-4 text-gray-700" />;
+                     })()}
                   </div>
-                  <span className="font-semibold text-orange-900">拍摄食物</span>
-                  <span className="text-sm text-orange-600/70 mt-1">AI 自动识别热量与营养</span>
+                  <span className="font-medium text-gray-700">已选择：{MEAL_TYPES.find(m => m.id === selectedMealType)?.label}</span>
+                  <button onClick={() => setStep('select_meal')} className="ml-auto text-xs text-blue-500 font-medium">更换</button>
                 </div>
-              </label>
 
-              <div className="relative w-full text-center">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-100"></div>
+                {/* Free Trial / VIP Status */}
+                {!userProfile.isPro && (
+                  <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-2xl border border-purple-100 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-purple-600 font-semibold mb-1">AI 分析体验次数</div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {userProfile.remainingFreeAnalyses} <span className="text-sm font-normal text-gray-500">/ 7</span>
+                      </div>
+                    </div>
+                    <button className="px-3 py-1.5 bg-black text-white text-xs font-bold rounded-lg flex items-center gap-1 shadow-md hover:scale-105 transition-transform">
+                      <Crown className="w-3 h-3 text-yellow-400" />
+                      升级无限次
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-6 flex-1">
+                  <label className="cursor-pointer group relative overflow-hidden h-40">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                    <div className="flex flex-row items-center justify-between p-8 rounded-3xl bg-gradient-to-br from-orange-400 to-pink-500 text-white shadow-lg shadow-orange-200 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 h-full">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-2xl mb-1">AI 拍照识别</span>
+                        <span className="text-sm opacity-90">精准识别食物热量</span>
+                      </div>
+                      <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
+                        <Camera className="w-8 h-8" />
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="cursor-pointer group relative overflow-hidden h-32">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                    <div className="flex flex-row items-center justify-between p-8 rounded-3xl bg-white border-2 border-gray-100 hover:border-purple-200 hover:bg-purple-50 text-gray-700 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-300 h-full">
+                       <div className="flex flex-col">
+                        <span className="font-bold text-xl mb-1">相册上传</span>
+                        <span className="text-sm text-gray-400">选择已有图片</span>
+                      </div>
+                      <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center">
+                        <Image className="w-6 h-6 text-purple-500" />
+                      </div>
+                    </div>
+                  </label>
                 </div>
-                <span className="relative bg-white px-4 text-sm text-gray-400">或</span>
-              </div>
+                
+                {error && (
+                  <div className="mt-4 p-3 bg-red-50 text-red-500 text-sm rounded-xl text-center animate-in fade-in">
+                    {error}
+                  </div>
+                )}
+             </div>
+          )}
 
-              <label className="w-full cursor-pointer group">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                />
-                <div className="flex items-center justify-center gap-3 p-4 rounded-2xl bg-gray-50 border border-gray-100 group-hover:bg-gray-100 transition-all">
-                  <Image className="w-5 h-5 text-gray-500" />
-                  <span className="font-medium text-gray-700">从相册选择</span>
+          {/* STEP 3: Preview */}
+          {step === 'preview' && previewImage && (
+            <div className="flex-1 flex flex-col p-6 animate-in zoom-in-95 duration-300">
+              <div className="relative rounded-3xl overflow-hidden shadow-lg aspect-square mb-6 bg-black group">
+                <img src={previewImage} alt="Preview" className="w-full h-full object-cover" />
+                
+                {/* Scan Animation Overlay */}
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-purple-500/20 to-transparent animate-scan pointer-events-none opacity-50" />
+                
+                <div className="absolute bottom-4 left-4 right-4 bg-black/50 backdrop-blur-md rounded-xl p-3 text-white text-center">
+                  <p className="text-sm font-medium">确认照片清晰度</p>
                 </div>
-              </label>
-              
-              {error && (
-                <div className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg text-center animate-in fade-in slide-in-from-bottom-2">
-                  {error}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : analyzing ? (
-          // Loading State
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-            <div className="relative mb-8">
-              <div className="w-24 h-24 border-4 border-blue-100 rounded-full">
-                <svg className="w-full h-full transform -rotate-90">
-                  <circle
-                    cx="48"
-                    cy="48"
-                    r="44"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                    fill="none"
-                    className="text-blue-100"
-                  />
-                  <circle
-                    cx="48"
-                    cy="48"
-                    r="44"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                    fill="none"
-                    className="text-blue-600 transition-all duration-300"
-                    strokeDasharray={`${2 * Math.PI * 44}`}
-                    strokeDashoffset={`${2 * Math.PI * 44 * (1 - progress / 100)}`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-2xl font-bold text-blue-600">{progress}%</span>
-              </div>
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">AI 正在分析餐盘...</h3>
-            <p className="text-gray-500 text-sm mb-2">识别热量与升糖风险</p>
-            {estimatedTime > 0 && (
-              <div className="flex items-center gap-2 text-sm text-gray-400 mb-6">
-                <Clock className="w-4 h-4" />
-                <span>预计还需 {estimatedTime} 秒</span>
-              </div>
-            )}
-            <button
-              onClick={handleClose}
-              className="flex items-center gap-2 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors"
-            >
-              <XCircle className="w-4 h-4" />
-              <span>取消分析</span>
-            </button>
-          </div>
-        ) : okResult ? (
-          // Result State
-          <div className="flex-1 flex flex-col p-6 bg-white overflow-y-auto">
-            {/* Header Info */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-md">AI 识别成功</span>
-                <span className="text-gray-400 text-xs">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-            </div>
-
-            {/* Food Title & Calories */}
-            <div className="flex items-start justify-between mb-4">
-              <h2 className="text-2xl font-bold text-gray-900 leading-tight max-w-[70%]">
-                {okResult.foodName}
-              </h2>
-              <div className="text-right">
-                <div className="text-3xl font-extrabold text-orange-500">{okResult.calories}</div>
-                <div className="text-xs text-gray-400 font-medium">kcal</div>
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div className="flex flex-wrap gap-2 mb-6">
-              {okResult.tags.map((tag, i) => (
-                <span key={i} className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded-lg">
-                  {tag}
-                </span>
-              ))}
-            </div>
-
-            {/* Advice Cards */}
-            <div className="space-y-4 mb-8">
-              <div className="bg-blue-50 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-4 h-4 text-blue-600" />
-                  <span className="text-sm font-bold text-blue-800">AI 营养建议</span>
-                </div>
-                <p className="text-sm text-blue-900/80 leading-relaxed">
-                  {okResult.advice}
-                </p>
               </div>
 
-              <div className="bg-orange-50 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Activity className="w-4 h-4 text-orange-600" />
-                  <span className="text-sm font-bold text-orange-800">行动指南</span>
-                </div>
-                <p className="text-sm text-orange-900/80 leading-relaxed">
-                  {okResult.nextStep}
-                </p>
+              <div className="grid grid-cols-2 gap-4 mt-auto">
+                <button
+                  onClick={() => {
+                    setPreviewImage(null);
+                    setStep('select_method');
+                  }}
+                  className="py-4 rounded-2xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors"
+                >
+                  重拍
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  className="py-4 rounded-2xl bg-black text-white font-bold hover:bg-gray-900 transition-colors shadow-lg shadow-gray-200 flex items-center justify-center gap-2"
+                >
+                  <ScanLine className="w-5 h-5" />
+                  开始分析
+                </button>
               </div>
             </div>
+          )}
 
-            {/* Bottom Button */}
-            <div className="mt-auto">
-              <button
-                onClick={handleSaveAndClose}
-                className="w-full py-4 bg-[#1a1b2e] text-white rounded-xl font-bold text-lg shadow-lg hover:bg-gray-900 active:scale-[0.98] transition-all"
-              >
-                记录并完成
-              </button>
-            </div>
-          </div>
-        ) : (
-          // Error State within modal (fallback if not caught earlier)
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
-              <XCircle className="w-10 h-10 text-red-500" />
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-3">分析失败</h3>
-            <p className="text-gray-500 text-sm mb-8 max-w-xs">{error}</p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleReset}
-                className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors"
-              >
-                重新拍照
-              </button>
-              <button
-                onClick={handleClose}
-                className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium transition-colors"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        )}
+
+        </div>
       </div>
+      
+      <style>{`
+        @keyframes scan {
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100%); }
+        }
+        .animate-scan {
+          animation: scan 2s linear infinite;
+        }
+      `}</style>
     </div>
   );
 }
