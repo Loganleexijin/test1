@@ -11,7 +11,7 @@ import { EarlyEndDrawer } from "@/components/fasting/EarlyEndDrawer";
 import { StartFastingDrawer } from "@/components/fasting/StartFastingDrawer";
 import { useFastingStore } from "@/stores/fastingStore";
 import { toast } from "@/hooks/use-toast";
-import { del as apiDel, get as apiGet, post as apiPost } from "@/lib/api";
+import { del as apiDel, get as apiGet, post as apiPost, postFunction } from "@/lib/api";
 import { useLocation, useNavigate } from "react-router-dom";
 
 type MealType = "breakfast" | "lunch" | "dinner";
@@ -196,8 +196,8 @@ const Index = () => {
     const run = async () => {
       setAiSummaryLoading(true);
       try {
-        const result = await apiPost<any, { meals: Array<{ type?: string; foodName?: string; calories?: number }> }>(
-          "/ai/analyze-day",
+        const result = await postFunction<any, { meals: Array<{ type?: string; foodName?: string; calories?: number }> }>(
+          "ai",
           {
             meals: todayMeals.map((m) => ({
               type: m.type,
@@ -229,7 +229,7 @@ const Index = () => {
     try {
       const upload = await apiPost<{ url: string; path: string }, { dataUrl: string }>("/files/upload", { dataUrl });
       const currentState = isFasting ? "断食中" : "准备开食";
-      const ai = await apiPost<AiMealResult, { image: string; currentState: string }>("/ai/analyze", {
+      const ai = await postFunction<AiMealResult, { image: string; currentState: string }>("ai", {
         image: upload.url,
         currentState,
       });

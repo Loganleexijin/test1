@@ -1,4 +1,6 @@
 const BASE_URL = "/api";
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 type ApiResponse<T> = {
   success: boolean;
@@ -42,6 +44,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     console.error(error);
     throw error;
   }
+}
+
+export async function postFunction<T, B = unknown>(functionName: string, body?: B): Promise<T> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error("Supabase 未配置：缺少 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
+  }
+
+  const headers = new Headers();
+  headers.set("Content-Type", "application/json");
+  headers.set("apikey", SUPABASE_ANON_KEY);
+
+  const token = localStorage.getItem("authToken");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
+    method: "POST",
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  const json = (await response.json().catch(() => null)) as any;
+  if (!response.ok) {
+    const message = typeof json?.message === "string" ? json.message : `Request failed: ${response.status}`;
+    throw new Error(message);
+  }
+  return json as T;
 }
 
 export function get<T>(path: string): Promise<T> {
