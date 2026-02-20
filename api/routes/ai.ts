@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { sendError, sendOk } from '../utils/api-response.js';
 
 const router = Router();
 
@@ -16,10 +17,8 @@ router.post('/analyze', async (req, res) => {
   const API_KEY = process.env.DOUBAO_API_KEY;
   if (!API_KEY) {
     console.error('Error: DOUBAO_API_KEY is not set.');
-    return res.status(500).json({
-      error: true,
-      message: '服务器配置错误：缺少 AI API 密钥',
-    });
+    sendError(res, 500, '服务器配置错误：缺少 AI API 密钥', 'AI_CONFIG_MISSING_KEY');
+    return;
   }
 
   const startTime = Date.now();
@@ -31,10 +30,8 @@ router.post('/analyze', async (req, res) => {
     const { image, currentState } = req.body as { image?: string; currentState?: string };
 
     if (!image || typeof image !== 'string') {
-      return res.status(400).json({
-        error: true,
-        message: '看起来这不是食物，或者图片太模糊了。请再拍一张试试！',
-      });
+      sendError(res, 400, '看起来这不是食物，或者图片太模糊了。请再拍一张试试！', 'AI_INVALID_IMAGE');
+      return;
     }
 
     const normalizedState = typeof currentState === 'string' && currentState.trim().length > 0 ? currentState.trim() : '准备开食';
@@ -131,15 +128,12 @@ router.post('/analyze', async (req, res) => {
       model: MODEL_ID
     });
 
-    res.json(result);
+    sendOk(res, result);
 
   } catch (error) {
     const totalTime = Date.now() - startTime;
     if (error instanceof Error && error.name === 'AbortError') {
-      res.status(504).json({
-        error: true,
-        message: '分析超时，请稍后重试',
-      });
+      sendError(res, 504, '分析超时，请稍后重试', 'AI_TIMEOUT');
       return;
     }
     console.error('AI Analysis error:', error);
@@ -148,17 +142,20 @@ router.post('/analyze', async (req, res) => {
       apiCallTime: `${apiCallTime}ms`,
       processingTime: `${processingTime}ms`
     });
-    res.status(500).json({
-      error: true,
-      message: error instanceof Error ? error.message : '分析服务暂时繁忙，请稍后再试',
-    });
+    sendError(
+      res,
+      500,
+      error instanceof Error ? error.message : '分析服务暂时繁忙，请稍后再试',
+      'AI_INTERNAL',
+    );
   }
 });
 
 router.post('/analyze-day', async (req, res) => {
   const API_KEY = process.env.DOUBAO_API_KEY;
   if (!API_KEY) {
-    return res.status(500).json({ error: true, message: '服务器配置错误：缺少 AI API 密钥' });
+    sendError(res, 500, '服务器配置错误：缺少 AI API 密钥', 'AI_CONFIG_MISSING_KEY');
+    return;
   }
 
   try {
@@ -166,7 +163,8 @@ router.post('/analyze-day', async (req, res) => {
       meals?: Array<{ type?: string; foodName?: string; calories?: number }>;
     };
     if (!meals || !Array.isArray(meals) || meals.length === 0) {
-      return res.status(400).json({ error: true, message: '没有饮食记录可分析' });
+      sendError(res, 400, '没有饮食记录可分析', 'AI_EMPTY_MEALS');
+      return;
     }
 
     const mealsText = meals.map((m) => 
@@ -221,14 +219,11 @@ ${mealsText}
     }
 
     const result = JSON.parse(jsonStr);
-    res.json(result);
+    sendOk(res, result);
 
   } catch (error) {
     console.error('Day Analysis Error:', error);
-    res.status(500).json({
-      error: true,
-      message: error instanceof Error ? error.message : '分析失败'
-    });
+    sendError(res, 500, error instanceof Error ? error.message : '分析失败', 'AI_INTERNAL');
   }
 });
 

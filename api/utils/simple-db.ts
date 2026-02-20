@@ -24,6 +24,7 @@ export interface MealRecord {
   imageUrl?: string;
   foodName: string;
   calories: number;
+  aiAnalysis?: unknown;
   // Simplified for DB storage
 }
 

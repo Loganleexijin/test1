@@ -1,5 +1,61 @@
 {
-  "sessions": [],
+  "sessions": [
+    {
+      "id": "356b4df3-1044-48ce-ba3f-e4104dc68b9a",
+      "fasting_status": "completed",
+      "start_at": 1700000000000,
+      "end_at": 1771571830654,
+      "target_duration_hours": 16,
+      "duration_minutes": 1192863,
+      "completed": true,
+      "source": "manual_start",
+      "timezone": "Asia/Shanghai"
+    },
+    {
+      "id": "5defba8c-25d4-4e74-ba54-42c17fd0bd80",
+      "fasting_status": "completed",
+      "start_at": 1771572073285,
+      "end_at": 1771572111929,
+      "target_duration_hours": 16,
+      "duration_minutes": 0,
+      "completed": true,
+      "source": "manual_start",
+      "timezone": "Asia/Shanghai"
+    },
+    {
+      "id": "6aa1ba92-66a0-4215-87f4-013e93c64216",
+      "fasting_status": "completed",
+      "start_at": 1771575360623,
+      "end_at": 1771575360641,
+      "target_duration_hours": 16,
+      "duration_minutes": 0,
+      "completed": true,
+      "source": "manual_start",
+      "timezone": "Asia/Shanghai"
+    },
+    {
+      "id": "d5938715-3252-46ca-9a3a-af6407dd00a7",
+      "fasting_status": "completed",
+      "start_at": 1771575471624,
+      "end_at": 1771575471642,
+      "target_duration_hours": 16,
+      "duration_minutes": 0,
+      "completed": true,
+      "source": "manual_start",
+      "timezone": "Asia/Shanghai"
+    },
+    {
+      "id": "7b95a3d4-bd0d-4236-8dca-5f55fa587094",
+      "fasting_status": "completed",
+      "start_at": 1771576968004,
+      "end_at": 1771576968022,
+      "target_duration_hours": 16,
+      "duration_minutes": 0,
+      "completed": true,
+      "source": "manual_start",
+      "timezone": "Asia/Shanghai"
+    }
+  ],
   "userSettings": {
     "plan": "16:8"
   },

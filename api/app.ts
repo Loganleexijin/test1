@@ -15,6 +15,9 @@ import cors from 'cors'
 import authRoutes from './routes/auth.js'
 import aiRoutes from './routes/ai.js'
 import fastingRoutes from './routes/fasting.js'
+import mealsRoutes from './routes/meals.js'
+import filesRoutes from './routes/files.js'
+import { sendError, sendOk } from './utils/api-response.js'
 
 const app: express.Application = express()
 
@@ -28,6 +31,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 app.use('/api/auth', authRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/fasting', fastingRoutes)
+app.use('/api/meals', mealsRoutes)
+app.use('/api/files', filesRoutes)
 
 /**
  * health
@@ -36,10 +41,7 @@ app.use(
   '/api/health',
   (req: Request, res: Response): void => {
     void req
-    res.status(200).json({
-      success: true,
-      message: 'ok',
-    })
+    sendOk(res, { status: 'ok' }, 'ok')
   },
 )
 
@@ -50,20 +52,14 @@ app.use((error: Error, req: Request, res: Response, next: unknown) => {
   void error
   void req
   void next
-  res.status(500).json({
-    success: false,
-    error: 'Server internal error',
-  })
+  sendError(res, 500, 'Server internal error')
 })
 
 /**
  * 404 handler
  */
 app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'API not found',
-  })
+  sendError(res, 404, 'API not found')
 })
 
 export default app

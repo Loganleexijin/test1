@@ -1,0 +1,34 @@
+我们今天先把**第一期目标**定下来，主要包含三块：
+
+1. **AI 参与分析**（核心能力落地）
+2. **启动页（Launch/Splash）**
+3. **生命体征监测**相关功能（基础监测与展示）
+
+---
+
+另外有一个**重点优化项**需要同步做：
+
+目前开启后的**圆环进度条**展示有两个问题——**时长显得过于漫长**、以及**进度条宽度偏窄**，会造成明显的视觉困扰，
+让用户感觉等待过程更久。这里需要调整进度表现（节奏与视觉比例），提升体感。
+
+---
+
+**前后端对接计划 (Frontend-Backend Integration Plan)**
+
+1.  **环境配置 (Config)**
+    - [ ] 修改 `vite.config.ts`，配置 `/api` 代理到后端服务 (`http://localhost:3001`)，解决跨域问题。
+
+2.  **API 客户端封装 (API Client)**
+    - [ ] 创建 `src/lib/api.ts`，封装统一的 HTTP 请求方法 (fetch/axios)。
+    - [ ] 处理基础 URL 配置及统一的错误拦截。
+
+3.  **状态管理改造 (Store Refactor)**
+    - [ ] 修改 `fastingStore.ts`，移除纯内存逻辑。
+    - [ ] 实现 `startFasting` Action：调用 `POST /api/fasting/start`。
+    - [ ] 实现 `endFasting` Action：调用 `POST /api/fasting/end`。
+    - [ ] 实现 `init` / `fetchCurrentStatus`：应用启动时调用 `GET /api/fasting/current` 同步状态。
+    - [ ] 实现 `fetchHistory`：调用 `GET /api/fasting/history` 获取历史记录。
+
+4.  **验证与测试 (Verification)**
+    - [ ] 验证断食开始、结束流程的数据持久化。
+    - [ ] 验证刷新页面后状态是否保持同步。

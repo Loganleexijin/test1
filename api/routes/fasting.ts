@@ -1,7 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import { db, type FastingSession } from '../utils/simple-db.js';
+import { sendError, sendOk } from '../utils/api-response.js';
+import { optionalAuth } from '../middleware/optional-auth.js';
+import { createSupabaseAuthedClient } from '../utils/supabase.js';
 
 const router = Router();
+
+router.use(optionalAuth);
 
 // Helper to calculate duration
 const calculateDuration = (start: number, end: number) => Math.floor((end - start) / 60000);
@@ -9,6 +14,28 @@ const calculateDuration = (start: number, end: number) => Math.floor((end - star
 // GET /api/fasting/current
 // Returns the current active session or null
 router.get('/current', (req: Request, res: Response) => {
+  if (req.user) {
+    void (async () => {
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const { data, error } = await supabase
+        .from('fasting_sessions')
+        .select('*')
+        .eq('user_id', req.user!.id)
+        .eq('completed', false)
+        .order('start_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        sendError(res, 500, error.message, 'FASTING_QUERY_FAILED');
+        return;
+      }
+
+      sendOk(res, data ?? null);
+    })();
+    return;
+  }
+
   const data = db.read();
   // Find a session that is NOT completed (idle, fasting, eating, paused)
   // Logic: "active" usually means fasting_status is 'fasting' or 'paused'. 
@@ -17,29 +44,106 @@ router.get('/current', (req: Request, res: Response) => {
   
   const activeSession = data.sessions.find((s) => !s.completed);
   
-  res.json({
-    success: true,
-    data: activeSession || null
-  });
+  sendOk(res, activeSession || null);
 });
 
 // GET /api/fasting/history
 router.get('/history', (req: Request, res: Response) => {
+  if (req.user) {
+    void (async () => {
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const { data, error } = await supabase
+        .from('fasting_sessions')
+        .select('*')
+        .eq('user_id', req.user!.id)
+        .eq('completed', true)
+        .order('start_at', { ascending: false });
+
+      if (error) {
+        sendError(res, 500, error.message, 'FASTING_QUERY_FAILED');
+        return;
+      }
+
+      sendOk(res, data ?? []);
+    })();
+    return;
+  }
+
   const data = db.read();
   // Return completed sessions sorted by date desc
   const history = data.sessions
     .filter((s) => s.completed)
     .sort((a, b) => b.start_at - a.start_at);
     
-  res.json({
-    success: true,
-    data: history
-  });
+  sendOk(res, history);
 });
 
 // POST /api/fasting/start
 router.post('/start', (req: Request, res: Response) => {
   const { targetHours, startTime, plan } = req.body;
+
+  if (req.user) {
+    void (async () => {
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const resolvedStart = startTime && typeof startTime === 'number' ? startTime : Date.now();
+      const resolvedTarget = typeof targetHours === 'number' && targetHours > 0 ? targetHours : 16;
+      const now = Date.now();
+
+      const { data: actives, error: activeError } = await supabase
+        .from('fasting_sessions')
+        .select('id,start_at')
+        .eq('user_id', req.user!.id)
+        .eq('completed', false);
+
+      if (activeError) {
+        sendError(res, 500, activeError.message, 'FASTING_QUERY_FAILED');
+        return;
+      }
+
+      await Promise.all(
+        (actives ?? []).map((s: any) =>
+          supabase
+            .from('fasting_sessions')
+            .update({
+              completed: true,
+              end_at: now,
+              duration_minutes: calculateDuration(Number(s.start_at), now),
+              fasting_status: 'completed',
+            })
+            .eq('id', s.id)
+            .eq('user_id', req.user!.id),
+        ),
+      );
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('fasting_sessions')
+        .insert({
+          user_id: req.user!.id,
+          fasting_status: 'fasting',
+          start_at: resolvedStart,
+          end_at: null,
+          target_duration_hours: resolvedTarget,
+          duration_minutes: 0,
+          completed: false,
+          source: 'manual_start',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        })
+        .select('*')
+        .single();
+
+      if (insertError) {
+        sendError(res, 500, insertError.message, 'FASTING_INSERT_FAILED');
+        return;
+      }
+
+      if (typeof plan === 'string' && plan.trim().length > 0) {
+        await supabase.from('user_profiles').upsert({ user_id: req.user!.id, plan }, { onConflict: 'user_id' });
+      }
+
+      sendOk(res, inserted);
+    })();
+    return;
+  }
   
   const newSession: FastingSession = {
     id: crypto.randomUUID(),
@@ -73,14 +177,56 @@ router.post('/start', (req: Request, res: Response) => {
     }
   });
 
-  res.json({
-    success: true,
-    data: newSession
-  });
+  sendOk(res, newSession);
 });
 
 // POST /api/fasting/end
 router.post('/end', (req: Request, res: Response) => {
+  if (req.user) {
+    void (async () => {
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const { data: active, error: activeError } = await supabase
+        .from('fasting_sessions')
+        .select('*')
+        .eq('user_id', req.user!.id)
+        .eq('completed', false)
+        .order('start_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeError) {
+        sendError(res, 500, activeError.message, 'FASTING_QUERY_FAILED');
+        return;
+      }
+      if (!active) {
+        sendError(res, 404, 'No active session found');
+        return;
+      }
+
+      const now = Date.now();
+      const { data: updated, error: updateError } = await supabase
+        .from('fasting_sessions')
+        .update({
+          completed: true,
+          end_at: now,
+          duration_minutes: calculateDuration(Number(active.start_at), now),
+          fasting_status: 'completed',
+        })
+        .eq('id', (active as any).id)
+        .eq('user_id', req.user!.id)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        sendError(res, 500, updateError.message, 'FASTING_UPDATE_FAILED');
+        return;
+      }
+
+      sendOk(res, updated);
+    })();
+    return;
+  }
+
   let updatedSession = null;
 
   db.update((data) => {
@@ -95,42 +241,97 @@ router.post('/end', (req: Request, res: Response) => {
   });
 
   if (!updatedSession) {
-    res.status(404).json({ success: false, error: 'No active session found' });
+    sendError(res, 404, 'No active session found');
     return;
   }
 
-  res.json({
-    success: true,
-    data: updatedSession
-  });
+  sendOk(res, updatedSession);
 });
 
 // POST /api/fasting/cancel
 router.post('/cancel', (req: Request, res: Response) => {
+  if (req.user) {
+    void (async () => {
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const { error } = await supabase
+        .from('fasting_sessions')
+        .delete()
+        .eq('user_id', req.user!.id)
+        .eq('completed', false);
+
+      if (error) {
+        sendError(res, 500, error.message, 'FASTING_DELETE_FAILED');
+        return;
+      }
+
+      sendOk(res, null, 'Session cancelled');
+    })();
+    return;
+  }
+
   db.update((data) => {
     // Remove the active session
     data.sessions = data.sessions.filter((s) => s.completed);
   });
 
-  res.json({
-    success: true,
-    message: 'Session cancelled'
-  });
+  sendOk(res, null, 'Session cancelled');
 });
 
 // POST /api/fasting/plan
 router.post('/plan', (req: Request, res: Response) => {
   const { plan } = req.body;
+  if (req.user) {
+    void (async () => {
+      if (!plan || typeof plan !== 'string') {
+        sendError(res, 400, 'Invalid plan', 'FASTING_INVALID_INPUT');
+        return;
+      }
+
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const { error } = await supabase
+        .from('user_profiles')
+        .upsert({ user_id: req.user!.id, plan }, { onConflict: 'user_id' });
+
+      if (error) {
+        sendError(res, 500, error.message, 'PROFILE_UPDATE_FAILED');
+        return;
+      }
+
+      sendOk(res, { plan });
+    })();
+    return;
+  }
+
   db.update((data) => {
     data.userSettings.plan = plan;
   });
-  res.json({ success: true, data: { plan } });
+  sendOk(res, { plan });
 });
 
 // GET /api/fasting/plan
 router.get('/plan', (req: Request, res: Response) => {
+  if (req.user) {
+    void (async () => {
+      const supabase = createSupabaseAuthedClient(req.authToken!);
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('plan')
+        .eq('user_id', req.user!.id)
+        .maybeSingle();
+
+      if (error) {
+        sendError(res, 500, error.message, 'PROFILE_QUERY_FAILED');
+        return;
+      }
+
+      const plan = (data as any)?.plan || '16:8';
+      sendOk(res, { plan });
+    })();
+    return;
+  }
+
   const data = db.read();
-  res.json({ success: true, data: { plan: data.userSettings.plan } });
+  sendOk(res, { plan: data.userSettings.plan });
 });
 
 export default router;

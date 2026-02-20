@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     pro_expire_at BIGINT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_login_at TIMESTAMP WITH TIME ZONE,
+    plan TEXT DEFAULT '16:8',
     
     -- Notification Settings (JSONB for flexibility)
     notification_settings JSONB DEFAULT '{
@@ -70,6 +71,56 @@ ALTER TABLE public.meal_records ENABLE ROW LEVEL SECURITY;
 
 -- 5. Create Policies (Simple version: allow public access for now since we handle auth in app logic)
 -- IMPORTANT: In a production app with real Auth, you should change 'true' to 'auth.uid()::text = user_id'
-CREATE POLICY "Allow public access to profiles" ON public.user_profiles FOR ALL USING (true);
-CREATE POLICY "Allow public access to sessions" ON public.fasting_sessions FOR ALL USING (true);
-CREATE POLICY "Allow public access to meals" ON public.meal_records FOR ALL USING (true);
+DROP POLICY IF EXISTS "Allow public access to profiles" ON public.user_profiles;
+DROP POLICY IF EXISTS "Allow public access to sessions" ON public.fasting_sessions;
+DROP POLICY IF EXISTS "Allow public access to meals" ON public.meal_records;
+
+DROP POLICY IF EXISTS "Profiles select own" ON public.user_profiles;
+DROP POLICY IF EXISTS "Profiles insert own" ON public.user_profiles;
+DROP POLICY IF EXISTS "Profiles update own" ON public.user_profiles;
+DROP POLICY IF EXISTS "Profiles delete own" ON public.user_profiles;
+
+CREATE POLICY "Profiles select own" ON public.user_profiles FOR SELECT USING (auth.uid()::text = user_id);
+CREATE POLICY "Profiles insert own" ON public.user_profiles FOR INSERT WITH CHECK (auth.uid()::text = user_id);
+CREATE POLICY "Profiles update own" ON public.user_profiles FOR UPDATE USING (auth.uid()::text = user_id) WITH CHECK (auth.uid()::text = user_id);
+CREATE POLICY "Profiles delete own" ON public.user_profiles FOR DELETE USING (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Sessions select own" ON public.fasting_sessions;
+DROP POLICY IF EXISTS "Sessions insert own" ON public.fasting_sessions;
+DROP POLICY IF EXISTS "Sessions update own" ON public.fasting_sessions;
+DROP POLICY IF EXISTS "Sessions delete own" ON public.fasting_sessions;
+
+CREATE POLICY "Sessions select own" ON public.fasting_sessions FOR SELECT USING (auth.uid()::text = user_id);
+CREATE POLICY "Sessions insert own" ON public.fasting_sessions FOR INSERT WITH CHECK (auth.uid()::text = user_id);
+CREATE POLICY "Sessions update own" ON public.fasting_sessions FOR UPDATE USING (auth.uid()::text = user_id) WITH CHECK (auth.uid()::text = user_id);
+CREATE POLICY "Sessions delete own" ON public.fasting_sessions FOR DELETE USING (auth.uid()::text = user_id);
+
+DROP POLICY IF EXISTS "Meals select own" ON public.meal_records;
+DROP POLICY IF EXISTS "Meals insert own" ON public.meal_records;
+DROP POLICY IF EXISTS "Meals update own" ON public.meal_records;
+DROP POLICY IF EXISTS "Meals delete own" ON public.meal_records;
+
+CREATE POLICY "Meals select own" ON public.meal_records FOR SELECT USING (auth.uid()::text = user_id);
+CREATE POLICY "Meals insert own" ON public.meal_records FOR INSERT WITH CHECK (auth.uid()::text = user_id);
+CREATE POLICY "Meals update own" ON public.meal_records FOR UPDATE USING (auth.uid()::text = user_id) WITH CHECK (auth.uid()::text = user_id);
+CREATE POLICY "Meals delete own" ON public.meal_records FOR DELETE USING (auth.uid()::text = user_id);
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('meal-images', 'meal-images', false)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Meal images select own" ON storage.objects;
+DROP POLICY IF EXISTS "Meal images insert own" ON storage.objects;
+DROP POLICY IF EXISTS "Meal images delete own" ON storage.objects;
+
+CREATE POLICY "Meal images select own" ON storage.objects
+FOR SELECT
+USING (bucket_id = 'meal-images' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY "Meal images insert own" ON storage.objects
+FOR INSERT
+WITH CHECK (bucket_id = 'meal-images' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY "Meal images delete own" ON storage.objects
+FOR DELETE
+USING (bucket_id = 'meal-images' AND (storage.foldername(name))[1] = auth.uid()::text);
