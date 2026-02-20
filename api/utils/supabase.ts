@@ -67,3 +67,13 @@ export function createSupabaseAdminClient(): SupabaseClient {
     },
   })
 }
+
+export function createSupabaseServerClient(): SupabaseClient {
+  const env = getSupabaseEnv()
+  if (!env) {
+    throw new Error('Supabase env is not configured')
+  }
+
+  if (env.serviceRoleKey) return createSupabaseAdminClient()
+  return createSupabaseAnonClient()
+}

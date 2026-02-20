@@ -3,11 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "workspaces": [
+    "lovable-ui/three-meal-track"
+  ],
   "scripts": {
-    "client:dev": "vite",
-    "build": "tsc -b && vite build",
+    "client:dev": "npm -w lovable-ui/three-meal-track run dev",
+    "build": "tsc -b && npm -w lovable-ui/three-meal-track run build",
     "lint": "eslint .",
-    "preview": "vite preview",
+    "preview": "npm -w lovable-ui/three-meal-track run preview",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "server:dev": "nodemon",
