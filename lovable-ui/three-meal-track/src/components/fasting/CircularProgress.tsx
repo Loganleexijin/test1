@@ -198,7 +198,7 @@ export function CircularProgress({
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
-            className="transition-all duration-1000 ease-out"
+            className="transition-all duration-300 ease-out"
             filter="url(#glow)"
           />
         </svg>

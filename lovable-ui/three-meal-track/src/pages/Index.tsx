@@ -330,12 +330,12 @@ const Index = () => {
           analysis={aiSummaryLoading ? "AI 分析生成中..." : aiSummary.analysis}
         />
 
-        {/* 动态能量条 */}
+        {/* 动态能量条 - 无餐食记录时显示空状态 */}
         <NutrientEnergyBar
-          fat={{ value: 24, max: 65 }}
-          carbs={{ value: 180, max: 300 }}
-          protein={{ value: 52, max: 80 }}
-          micros={{ value: 68, max: 100 }}
+          fat={{ value: mealsRecorded > 0 ? 24 : 0, max: 65 }}
+          carbs={{ value: mealsRecorded > 0 ? 180 : 0, max: 300 }}
+          protein={{ value: mealsRecorded > 0 ? 52 : 0, max: 80 }}
+          micros={{ value: mealsRecorded > 0 ? 68 : 0, max: 100 }}
         />
       </div>
 

@@ -1,3 +1,79 @@
+# 问题修复记录
+
+## 已修复问题 (2026-02-21)
+
+### 1. 断食倒计时失效问题 ✅
+**根因：**
+- `CircularProgress.tsx:201` 使用了 `duration-1000` 过渡动画，导致视觉更新延迟1秒
+
+**修复：**
+- 将动画时长从 1000ms 改为 300ms，确保点击"开始断食"后1秒内进度条开始倒计时
+- 文件：`lovable-ui/three-meal-track/src/components/fasting/CircularProgress.tsx`
+
+### 2. 营养卡片初始值异常 ✅
+**根因：**
+- `Index.tsx:335-339` 直接硬编码了营养默认值（fat:24, carbs:180, protein:52, micros:68）
+- `userStore.ts:184-188` 的 `resetAll` 只重置内存状态，未清除 localStorage
+
+**修复：**
+- 营养卡片现在根据 `mealsRecorded` 状态决定是否显示数值：
+  - 有餐食记录时显示计算值
+  - 无餐食记录时显示 0（清空数据后显示"--"或 0）
+- `resetAll` 现在清除所有 localStorage 数据：
+  - authToken
+  - fastingState
+  - userSettings
+  - mealRecords
+  - onboardingCompleted
+- 文件：`lovable-ui/three-meal-track/src/pages/Index.tsx`
+- 文件：`lovable-ui/three-meal-track/src/stores/userStore.ts`
+
+### 3. 服务器内部错误 + 前后端未对接 ✅
+**根因：**
+- 后端未正确加载 .env.local 文件，导致 Supabase 环境变量缺失
+- 错误处理过于简单，只返回 "Server internal error" 没有详细错误信息
+- 调试困难，无法定位具体错误
+
+**修复：**
+- **环境变量加载优化**：`app.ts` 现在按优先级加载 `.env.local` > `.env`，并添加日志提示
+- **环境变量验证**：启动时检查必要的环境变量，输出警告信息
+- **详细错误日志**：错误中间件现在记录完整的错误信息、请求路径、方法、时间戳
+- **智能错误分类**：
+  - 数据库未配置 → 返回 503 + `DB_NOT_CONFIGURED`
+  - 连接错误 → 返回 503 + `CONNECTION_ERROR`
+  - 其他错误 → 返回 500 + `INTERNAL_ERROR`
+- **注意**：auth 路由 (`/api/auth/*`) 已经实现，之前诊断有误，实际功能正常
+
+**验证步骤：**
+1. 检查后端日志，确认环境变量已加载
+2. 访问 `/api/health` 测试基础连接
+3. 测试注册/登录功能
+4. 查看详细的错误日志输出
+
+---
+
+## 后续待办
+
+### 高优先级
+- [ ] 测试断食倒计时功能是否正常工作（点击开始断食后观察进度条）
+- [ ] 测试清空数据功能，确认营养卡片归零
+- [ ] 测试注册/登录，确认无 "Server internal error"
+- [ ] 补充 API 文档和错误码说明
+
+### 中优先级  
+- [ ] 添加前端错误边界处理
+- [ ] 实现断食提前结束弹窗逻辑（目前代码存在但未验证）
+- [ ] 营养卡片数值应从后端获取，而非前端计算
+
+### 技术债务
+- [ ] 考虑使用 React Query 或 SWR 替代直接 fetch
+- [ ] 统一前后端类型定义
+- [ ] 添加端到端测试
+
+---
+
+## 原始 TODO List
+
 我们今天先把**第一期目标**定下来，主要包含三块：
 
 1. **AI 参与分析**（核心能力落地）
@@ -16,18 +92,18 @@
 **前后端对接计划 (Frontend-Backend Integration Plan)**
 
 1.  **环境配置 (Config)**
-    - [ ] 修改 `vite.config.ts`，配置 `/api` 代理到后端服务 (`http://localhost:3001`)，解决跨域问题。
+    - [x] 修改 `vite.config.ts`，配置 `/api` 代理到后端服务 (`http://localhost:3001`)，解决跨域问题。
 
 2.  **API 客户端封装 (API Client)**
-    - [ ] 创建 `src/lib/api.ts`，封装统一的 HTTP 请求方法 (fetch/axios)。
-    - [ ] 处理基础 URL 配置及统一的错误拦截。
+    - [x] 创建 `src/lib/api.ts`，封装统一的 HTTP 请求方法 (fetch/axios)。
+    - [x] 处理基础 URL 配置及统一的错误拦截。
 
 3.  **状态管理改造 (Store Refactor)**
-    - [ ] 修改 `fastingStore.ts`，移除纯内存逻辑。
-    - [ ] 实现 `startFasting` Action：调用 `POST /api/fasting/start`。
-    - [ ] 实现 `endFasting` Action：调用 `POST /api/fasting/end`。
-    - [ ] 实现 `init` / `fetchCurrentStatus`：应用启动时调用 `GET /api/fasting/current` 同步状态。
-    - [ ] 实现 `fetchHistory`：调用 `GET /api/fasting/history` 获取历史记录。
+    - [x] 修改 `fastingStore.ts`，移除纯内存逻辑。
+    - [x] 实现 `startFasting` Action：调用 `POST /api/fasting/start`。
+    - [x] 实现 `endFasting` Action：调用 `POST /api/fasting/end`。
+    - [x] 实现 `init` / `fetchCurrentStatus`：应用启动时调用 `GET /api/fasting/current` 同步状态。
+    - [x] 实现 `fetchHistory`：调用 `GET /api/fasting/history` 获取历史记录。
 
 4.  **验证与测试 (Verification)**
     - [ ] 验证断食开始、结束流程的数据持久化。

@@ -181,11 +181,20 @@ export const useUserStore = create<UserStore>((set) => ({
     }
   },
   
-  resetAll: () => set({
-    userProfile: defaultProfile,
-    userStats: defaultStats,
-    authToken: null,
-  }),
+  resetAll: () => {
+    // 清除所有 localStorage 数据
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('fastingState');
+    localStorage.removeItem('userSettings');
+    localStorage.removeItem('mealRecords');
+    localStorage.removeItem('onboardingCompleted');
+    
+    set({
+      userProfile: defaultProfile,
+      userStats: defaultStats,
+      authToken: null,
+    });
+  },
 }));
 
 // Build badges based on stats
