@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { get as apiGet, post as apiPost } from '@/lib/api';
 
-interface FastingSession {
+export interface FastingSession {
   id: string;
   fasting_status: 'idle' | 'fasting' | 'eating' | 'paused' | 'completed';
   start_at: number;

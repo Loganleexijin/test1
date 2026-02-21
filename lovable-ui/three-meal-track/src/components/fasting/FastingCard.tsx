@@ -12,6 +12,8 @@ interface FastingCardProps {
   startTime?: string;
   endTime?: string;
   onStartFasting?: () => void;
+  onAddRecord?: () => void;
+  onOpenHistory?: () => void;
 }
 
 export function FastingCard({
@@ -23,6 +25,8 @@ export function FastingCard({
   startTime = "今天 19:30",
   endTime = "明天 11:30",
   onStartFasting,
+  onAddRecord,
+  onOpenHistory,
 }: FastingCardProps) {
   const { setShowFastingComplete, setShowEarlyEndConfirm } = useFastingStore();
 
@@ -50,10 +54,24 @@ export function FastingCard({
       <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
         <h2 className="text-lg font-semibold text-foreground">Flux</h2>
         <div className="flex items-center gap-3">
-          <button className="px-3 py-1.5 rounded-lg bg-muted text-sm text-muted-foreground hover:bg-muted/80 transition-colors">
+          <button
+            onClick={() => {
+              if (onAddRecord) {
+                onAddRecord();
+              }
+            }}
+            className="px-3 py-1.5 rounded-lg bg-muted text-sm text-muted-foreground hover:bg-muted/80 transition-colors"
+          >
             补录断食
           </button>
-          <button className="p-2 rounded-lg hover:bg-muted transition-colors">
+          <button
+            onClick={() => {
+              if (onOpenHistory) {
+                onOpenHistory();
+              }
+            }}
+            className="p-2 rounded-lg hover:bg-muted transition-colors"
+          >
             <Calendar className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>

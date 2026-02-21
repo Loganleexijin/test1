@@ -9,6 +9,9 @@ import { PhotoMealModal } from "@/components/modals/PhotoMealModal";
 import { FastingCompleteSheet } from "@/components/fasting/FastingCompleteSheet";
 import { EarlyEndDrawer } from "@/components/fasting/EarlyEndDrawer";
 import { StartFastingDrawer } from "@/components/fasting/StartFastingDrawer";
+import { FastingRecordDrawer } from "@/components/fasting/FastingRecordDrawer";
+import { FastingHistoryDrawer } from "@/components/fasting/FastingHistoryDrawer";
+import type { FastingSession } from "@/stores/fastingStore";
 import { useFastingStore } from "@/stores/fastingStore";
 import { toast } from "@/hooks/use-toast";
 import { del as apiDel, get as apiGet, post as apiPost, postFunction } from "@/lib/api";
@@ -49,6 +52,8 @@ const Index = () => {
     endFasting,
     startFasting,
     fetchCurrentStatus,
+    fetchHistory,
+    fastingHistory,
     newBadge,
     isLoading,
     error
@@ -63,6 +68,8 @@ const Index = () => {
   // 抽屉/弹框状态
   const [showStartFasting, setShowStartFasting] = useState(false);
   const [showPhotoMeal, setShowPhotoMeal] = useState(false);
+  const [showAddFasting, setShowAddFasting] = useState(false);
+  const [showFastingHistory, setShowFastingHistory] = useState(false);
 
   // 餐食加载状态
   const [loadingMeal, setLoadingMeal] = useState<MealType | null>(null);
@@ -297,7 +304,15 @@ const Index = () => {
         </div>
 
         {/* 断食状态卡片 */}
-        <FastingCard {...fastingData} onStartFasting={() => setShowStartFasting(true)} />
+        <FastingCard
+          {...fastingData}
+          onStartFasting={() => setShowStartFasting(true)}
+          onAddRecord={() => setShowAddFasting(true)}
+          onOpenHistory={() => {
+            setShowFastingHistory(true);
+            fetchHistory();
+          }}
+        />
 
         {/* 三餐时间轴 */}
         <div>
@@ -377,6 +392,43 @@ const Index = () => {
           await endFasting(reason);
           toast({ title: "已记录本次断食", description: `${fastingData.fastingHours}小时${fastingData.fastingMinutes}分钟` });
         }}
+      />
+
+      <FastingRecordDrawer
+        open={showAddFasting}
+        onOpenChange={setShowAddFasting}
+        mode="add"
+        onSave={async (data) => {
+          try {
+            const targetHoursValue = 16;
+            const durationMs = data.endTime.getTime() - data.startTime.getTime();
+            const durationMinutes = Math.floor(durationMs / 60000);
+            
+            await apiPost('/fasting/start', {
+              targetHours: targetHoursValue,
+              startTime: data.startTime.getTime(),
+              plan: `${targetHoursValue}:8`,
+            });
+            
+            await endFasting();
+            
+            toast({ title: '补录成功', description: `已记录 ${Math.floor(durationMinutes / 60)}小时${durationMinutes % 60}分钟 的断食` });
+            setShowAddFasting(false);
+            await fetchCurrentStatus();
+          } catch (e) {
+            toast({
+              title: '补录失败',
+              description: e instanceof Error ? e.message : '未知错误',
+              variant: 'destructive',
+            });
+          }
+        }}
+      />
+
+      <FastingHistoryDrawer
+        open={showFastingHistory}
+        onOpenChange={setShowFastingHistory}
+        sessions={fastingHistory}
       />
 
       <StartFastingDrawer
