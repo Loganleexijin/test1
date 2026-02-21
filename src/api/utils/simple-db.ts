@@ -36,7 +36,7 @@ export interface DatabaseSchema {
   mealRecords: MealRecord[];
 }
 
-const DB_FILE = path.join(process.cwd(), 'api', 'data', 'db.json');
+const DB_FILE = path.join(process.cwd(), 'src', 'api', 'data', 'db.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(path.dirname(DB_FILE))) {
